@@ -3,11 +3,13 @@
 #include <string.h>
 #include <unistd.h>
 
-#define CMDLINE_MAX 512
+#define CMDLINE_MAXCHAR 512
+#define CMDLINE_MAXARGNUM 16
+#define CMDLINE_MAXTOKLEN 32
 
 int main(void)
 {
-        char cmd[CMDLINE_MAX];
+        char cmd[CMDLINE_MAXCHAR];
 
         while (1) {
                 char *nl;
@@ -18,7 +20,7 @@ int main(void)
                 fflush(stdout);
 
                 /* Get command line */
-                fgets(cmd, CMDLINE_MAX, stdin);
+                fgets(cmd, CMDLINE_MAXCHAR, stdin);
 
                 /* Print command line if stdin is not provided by terminal */
                 if (!isatty(STDIN_FILENO)) {
