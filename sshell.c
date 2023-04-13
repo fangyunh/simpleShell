@@ -10,6 +10,7 @@
 #define CMDLINE_MAXTOKLEN 32
 
 char** parseCmdInArr(char *cmd);
+void freeArray(char** arr, int elementNum);
 
 int main(void)
 {
@@ -59,13 +60,13 @@ int main(void)
             /* Regular command, $PATH environment commands*/
             pid = fork();
             if (pid < 0) {
-                perror("fork failed");
+                fprintf(stderr, "fork error");
                 exit(EXIT_FAILURE);
             } else if (pid == 0) {
                 // Child process
                 char* instru[] = {"sh", "-c", cmd, NULL };
                 execvp("sh", instru);
-                perror("execvp failed");
+                fprintf(stderr, "execvp error");
                 exit(EXIT_FAILURE);
             } else {
                 // Parent process
@@ -73,6 +74,7 @@ int main(void)
                 fprintf(stderr, "+ completed '%s': [%d]\n",
                         cmd, WEXITSTATUS(retval));
             }
+            freeArray(commandArr, CMDLINE_MAXARGNUM);
         }
 
         return EXIT_SUCCESS;
@@ -90,20 +92,15 @@ char** parseCmdInArr(char* cmd) {
         if (count > CMDLINE_MAXARGNUM) {
             fprintf(stderr, "Command exceeds the limit of number of tokens.\n");
             free(token);
-            for (int i = 0; i < count; i++) {
-                free(commands[i]);
-            }
-            free(commands);
+            freeArray(commands, count);
             return NULL;
         }
+
         sscanf(cmd + cursor, "%[^ ]", token);
         if (strlen(token) > CMDLINE_MAXTOKLEN) {
             fprintf(stderr, "Command exceeds the limit of token max length\n");
             free(token);
-            for (int i = 0; i < count; i++) {
-                free(commands[i]);
-            }
-            free(commands);
+            freeArray(commands, count);
             return NULL;
         }
         commands[count] = (char*) calloc(strlen(token) + 1, sizeof(char));
@@ -120,10 +117,17 @@ char** parseCmdInArr(char* cmd) {
         cursor++;
         cursor = pos - cmd + 1;
     }
+    free(token);
 
     return commands;
 }
 
-
+/* free the allocated space */
+void freeArray(char** arr, int elementNum) {
+    for (int i = 0; i < elementNum; i++) {
+        free(arr[i]);
+    }
+    free(arr);
+}
 
 
