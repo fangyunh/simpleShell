@@ -27,7 +27,7 @@ void freeLinkedList(struct inputCmd *head) {
     }
 }
 
-/* Parse the cmds in array (fangyunh) */
+/* Parse the cmds in linked-list (fangyunh) */
 struct inputCmd* parseCmdInList(char* cmd) {
     //char** commands = (char**) calloc(CMDLINE_MAXARGNUM, sizeof(char*));
     int cursor = 0;
