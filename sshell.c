@@ -97,6 +97,27 @@ struct inputCmd* parseCmdInList(char* cmd) {
     return head;
 }
 
+/* cd built-in function */
+void builtinCd (struct inputCmd *head) {
+    struct inputCmd *filePath = head->next;
+    int status = chdir(filePath->cmdStr);
+    if (status == -1) {
+        fprintf(stderr, "cd error");
+    }
+}
+
+
+/* Determine and execute bulit-in functions */
+bool builtinFunctions(struct inputCmd *head) {
+    if (!strcmp(head->cmdStr, "cd")) {
+        builtinCd(head);
+        return true;
+    } else if (!strcmp(head->cmdStr, "pwd")) {
+        return true;
+    }
+    return false;
+}
+
 int main(void)
 {
         char cmd[CMDLINE_MAXCHAR];
@@ -105,7 +126,8 @@ int main(void)
             char *nl;
             int retval;
             pid_t pid;
-            struct inputCmd *commandArr;
+            struct inputCmd *commandList;
+            bool builtinFlag = false;
 
             /* Print prompt */
             printf("sshell@ucd$ ");
@@ -130,24 +152,24 @@ int main(void)
                 *nl = '\0';
 
             /* Parse the commands in an array */
-            commandArr = parseCmdInList(cmd);
-
-            struct inputCmd *hello = commandArr;
-            int a = 0;
-            while (hello) {
-                printf("The %dth is %s\n", a, hello->cmdStr);
-                hello = hello->next;
-                a++;
-            }
-
+            commandList = parseCmdInList(cmd);
 
             /* Builtin command */
             if (!strcmp(cmd, "exit")) {
                 fprintf(stderr, "Bye...\n");
+                fprintf(stderr, "+ completed '%s': [%d]\n",
+                        cmd, 0);
                 break;
+            }
+            builtinFlag = builtinFunctions(commandList);
+            if (builtinFlag) {
+                fprintf(stderr, "+ completed '%s': [%d]\n",
+                        cmd, 0);
+                continue;
             }
 
             /* Regular command, $PATH environment commands*/
+
             pid = fork();
             if (pid < 0) {
                 fprintf(stderr, "fork error");
@@ -164,7 +186,7 @@ int main(void)
                 fprintf(stderr, "+ completed '%s': [%d]\n",
                         cmd, WEXITSTATUS(retval));
             }
-            freeLinkedList(commandArr);
+            freeLinkedList(commandList);
         }
 
         return EXIT_SUCCESS;
