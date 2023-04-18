@@ -18,6 +18,13 @@ struct inputCmd
     struct inputCmd *next;
 };
 
+struct cmdType
+{
+    int binFunc;
+    int pip;
+    int oRdir;
+};
+
 /* free the allocated space of linked list*/
 void freeLinkedList(struct inputCmd *head)
 {
@@ -77,7 +84,7 @@ struct inputCmd *parseCmdInList(char *cmd)
             break;
         }
 
-        struct inputCmd *newNode = (struct inputCmd *)calloc(1, sizeof(struct inputCmd));
+        struct inputCmd *newNode = (struct inputCmd *)calloc(2, sizeof(struct inputCmd));
         newNode->cmdStr = (char *)calloc(strlen(token) + 1, sizeof(char));
         if (!newNode->cmdStr)
         {
@@ -149,6 +156,38 @@ char** parseCmdInArr(char* cmd) {
     return commands;
 }
 
+/* Initialize the type structure */
+void typeInit(struct cmdType *type)
+{
+    type->binFunc = 0;
+    type->oRdir = 0;
+    type->pip = 0;
+}
+
+/* Classify the command into different types */
+void deterType(struct inputCmd *list, char *cmd, struct cmdType *type)
+{
+    char *builtin[] = {"cd", "pwd", "exit"};
+
+    for (int i = 0; i < 3; i++)
+    {
+        if (strcmp(list->cmdStr, builtin[i]) == 0)
+        {
+            type->binFunc = 1;
+        }
+    }
+
+    if (strchr(cmd, '>'))
+    {
+        type->oRdir = 1;
+    }
+
+    if (strchr(cmd, '|'))
+    {
+        type->pip = 1;
+    }
+}
+
 /* Remove the last element in the linked list */
 void rmvLast(struct inputCmd *head)
 {
@@ -175,14 +214,12 @@ void execRegCmd(char **instru, char *cmd)
     }
     else if (pid == 0)
     {
-        // Child process
         execvp(instru[0], instru);
         fprintf(stderr, "execvp error\n");
         exit(EXIT_FAILURE);
     }
     else
     {
-        // Parent process
         wait(&retval);
         fprintf(stderr, "+ completed '%s': [%d]\n",
                 cmd, WEXITSTATUS(retval));
@@ -191,28 +228,47 @@ void execRegCmd(char **instru, char *cmd)
 
 
 /* Put the file to FD = STDOUT_FILENO */
-void conductRedirection()
+void conductRedirection(char **file, char **instruc, char *first)
 {
     pid_t pid;
-    pid = fork();
-    if (!pid)
-    {
+    int fd;
+    int status;
 
+    pid = fork();
+    if (pid < 0)
+    {
+        fprintf(stderr, "fork error");
+        exit(EXIT_FAILURE);
+    } else if (pid == 0) {
+        fd = open(file[0], O_WRONLY | O_CREAT, 0644);
+        if (fd < 0) {
+            perror("open or create file error");
+            exit(EXIT_FAILURE);
+        }
+
+        dup2(fd, STDOUT_FILENO);
+        close(fd);
+        execRegCmd(instruc, first);
+        exit(EXIT_SUCCESS);
+    } else {
+        waitpid(pid, &status, 0);
     }
 }
 
-/* Output Redirection */
+/* Output Redirection Structure */
 void outputRedirection(char *cmd)
 {
     char *firstCmd = strtok(cmd, ">");
-    struct inputCmd *firstHead = parseCmdInList(firstCmd);
+    //struct inputCmd *firstHead = parseCmdInList(firstCmd);
+    char **instruc = parseCmdInArr(firstCmd);
     char *secondCmd = strtok(NULL, ">");
-    struct inputCmd *secondHead = parseCmdInList(secondCmd);
-    rmvLast(firstHead);
+    char **file = parseCmdInArr(secondCmd);
+    //struct inputCmd *secondHead = parseCmdInList(secondCmd);
+    //rmvLast(firstHead);
 
-    conductRedirection();
-    freeLinkedList(secondHead);
-    freeLinkedList(firstHead);
+    conductRedirection(file, instruc, firstCmd);
+    //freeLinkedList(secondHead);
+    //freeLinkedList(firstHead);
 }
 
 /* PWD built-in function */
@@ -242,19 +298,16 @@ void builtinCd(struct inputCmd *head)
 }
 
 /* Determine and execute bulit-in functions */
-bool builtinFunctions(struct inputCmd *head)
+void builtinFunctions(struct inputCmd *head)
 {
     if (!strcmp(head->cmdStr, "cd"))
     {
         builtinCd(head);
-        return true;
     }
     else if (!strcmp(head->cmdStr, "pwd"))
     {
         builtinPWD();
-        return true;
     }
-    return false;
 }
 
 int main(void)
@@ -265,7 +318,8 @@ int main(void)
     {
         char *nl;
         struct inputCmd *commandList;
-        bool builtinFlag = false;
+        struct cmdType *type = (struct cmdType *) calloc(3, sizeof(struct cmdType));
+        typeInit(type);
 
         /* Print prompt */
         printf("sshell@ucd$ ");
@@ -291,35 +345,52 @@ int main(void)
         if (nl)
             *nl = '\0';
 
+        /* Classify the command type */
+
+
         /* Detect output redirection */
-        char *hasRedirect = strchr(cmd, '>');
-        if (hasRedirect)
-        {
-            outputRedirection(cmd);
-        }
+//        char *hasRedirect = strchr(cmd, '>');
+//        if (hasRedirect)
+//        {
+//            outputRedirection(cmd);
+//        }
 
         /* Parse the commands in a Linked list */
         commandList = parseCmdInList(cmd);
 
-        /* Builtin command */
-        if (!strcmp(cmd, "exit"))
+        /* Determine the type of command */
+        deterType(commandList, cmd, type);
+
+        /* Execute the command according to their types */
+        if (type->binFunc)
         {
-            fprintf(stderr, "Bye...\n");
+            /* Builtin command */
+            if (!strcmp(cmd, "exit"))
+            {
+                fprintf(stderr, "Bye...\n");
+                fprintf(stderr, "+ completed '%s': [%d]\n",
+                        cmd, 0);
+                break;
+            }
+            builtinFunctions(commandList);
             fprintf(stderr, "+ completed '%s': [%d]\n",
-                    cmd, 0);
-            break;
-        }
-        builtinFlag = builtinFunctions(commandList);
-        if (builtinFlag)
-        {
-            fprintf(stderr, "+ completed '%s': [%d]\n",
-                    cmd, 0);
-            continue;
+                        cmd, 0);
+        } else {
+            if (type->oRdir)
+            {
+                /* Output Redirection */
+                outputRedirection(cmd);
+            } else if (type->pip){
+                /* Pipe */
+            } else {
+                /* Regular command, $PATH environment commands*/
+                char **cmdArr = parseCmdInArr(cmd);
+                execRegCmd(cmdArr, cmd);
+                freeArray(cmdArr);
+            }
+
         }
 
-        /* Regular command, $PATH environment commands*/
-        char ** cmdArr = parseCmdInArr(cmd);
-        execRegCmd(cmdArr, cmd);
 
         /***
         pid = fork();
@@ -346,7 +417,6 @@ int main(void)
          ***/
 
         freeLinkedList(commandList);
-        freeArray(cmdArr);
     }
 
     return EXIT_SUCCESS;
