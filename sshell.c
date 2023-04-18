@@ -18,7 +18,7 @@ struct inputCmd
     struct inputCmd *next;
 };
 
-/* free the allocated space */
+/* free the allocated space of linked list*/
 void freeLinkedList(struct inputCmd *head)
 {
     struct inputCmd *ptr = head;
@@ -29,6 +29,15 @@ void freeLinkedList(struct inputCmd *head)
         free(ptr);
         ptr = node;
     }
+}
+
+/* free the allocated space of array */
+void freeArray(char **head)
+{
+    for (int i = 0; i < CMDLINE_MAXARGNUM + 1; i++) {
+        free(head[i]);
+    }
+    free(head);
 }
 
 /* Parse the cmds in linked-list (fangyunh) */
@@ -111,6 +120,35 @@ struct inputCmd *parseCmdInList(char *cmd)
     return head;
 }
 
+/* Parse the command line in an array with a NULL in the end */
+char** parseCmdInArr(char* cmd) {
+    char** commands = (char**) calloc(CMDLINE_MAXARGNUM+1, sizeof(char*));
+    int cursor = 0;
+    char* token = (char*) calloc(CMDLINE_MAXTOKLEN, sizeof(char));
+    char* pos;
+    int count = 0;
+
+    while (cmd != NULL) {
+        sscanf(cmd + cursor, "%[^ ]", token);
+        commands[count] = (char*) calloc(strlen(token) + 1, sizeof(char));
+        strcpy(commands[count], token);
+        count++;
+
+        pos = strchr(cmd + cursor, ' ');
+        while (pos != NULL && *(pos+1) == ' ') {
+            pos++;
+        }
+        if (pos == NULL) {
+            break;
+        }
+        cursor++;
+        cursor = pos - cmd + 1;
+    }
+    commands[count] = NULL; // Satisfy the execvp() requirement
+
+    return commands;
+}
+
 /* Remove the last element in the linked list */
 void rmvLast(struct inputCmd *head)
 {
@@ -124,22 +162,22 @@ void rmvLast(struct inputCmd *head)
     freeLinkedList(tail);
 }
 
-/* Execute regular command in $PATH environment */
-void execRegCmd(char* execFile, char **instru, char *cmd)
+/* Execute regular command and $PATH environment commands */
+void execRegCmd(char **instru, char *cmd)
 {
     int retval;
     pid_t pid;
     pid = fork();
     if (pid < 0)
     {
-        fprintf(stderr, "fork error");
+        fprintf(stderr, "fork error\n");
         exit(EXIT_FAILURE);
     }
     else if (pid == 0)
     {
         // Child process
-        execvp(execFile, instru);
-        fprintf(stderr, "execvp error");
+        execvp(instru[0], instru);
+        fprintf(stderr, "execvp error\n");
         exit(EXIT_FAILURE);
     }
     else
@@ -280,8 +318,8 @@ int main(void)
         }
 
         /* Regular command, $PATH environment commands*/
-        char *instru[] = {"sh", "-c", cmd, NULL};
-        execRegCmd("sh", instru, cmd);
+        char ** cmdArr = parseCmdInArr(cmd);
+        execRegCmd(cmdArr, cmd);
 
         /***
         pid = fork();
@@ -308,6 +346,7 @@ int main(void)
          ***/
 
         freeLinkedList(commandList);
+        freeArray(cmdArr);
     }
 
     return EXIT_SUCCESS;
