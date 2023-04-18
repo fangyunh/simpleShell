@@ -124,6 +124,45 @@ void rmvLast(struct inputCmd *head)
     freeLinkedList(tail);
 }
 
+/* Execute regular command in $PATH environment */
+void execRegCmd(char* execFile, char **instru, char *cmd)
+{
+    int retval;
+    pid_t pid;
+    pid = fork();
+    if (pid < 0)
+    {
+        fprintf(stderr, "fork error");
+        exit(EXIT_FAILURE);
+    }
+    else if (pid == 0)
+    {
+        // Child process
+        execvp(execFile, instru);
+        fprintf(stderr, "execvp error");
+        exit(EXIT_FAILURE);
+    }
+    else
+    {
+        // Parent process
+        wait(&retval);
+        fprintf(stderr, "+ completed '%s': [%d]\n",
+                cmd, WEXITSTATUS(retval));
+    }
+}
+
+
+/* Put the file to FD = STDOUT_FILENO */
+void conductRedirection()
+{
+    pid_t pid;
+    pid = fork();
+    if (!pid)
+    {
+
+    }
+}
+
 /* Output Redirection */
 void outputRedirection(char *cmd)
 {
@@ -132,7 +171,8 @@ void outputRedirection(char *cmd)
     char *secondCmd = strtok(NULL, ">");
     struct inputCmd *secondHead = parseCmdInList(secondCmd);
     rmvLast(firstHead);
-    
+
+    conductRedirection();
     freeLinkedList(secondHead);
     freeLinkedList(firstHead);
 }
@@ -186,8 +226,6 @@ int main(void)
     while (1)
     {
         char *nl;
-        int retval;
-        pid_t pid;
         struct inputCmd *commandList;
         bool builtinFlag = false;
 
@@ -242,6 +280,10 @@ int main(void)
         }
 
         /* Regular command, $PATH environment commands*/
+        char *instru[] = {"sh", "-c", cmd, NULL};
+        execRegCmd("sh", instru, cmd);
+
+        /***
         pid = fork();
         if (pid < 0)
         {
@@ -263,6 +305,7 @@ int main(void)
             fprintf(stderr, "+ completed '%s': [%d]\n",
                     cmd, WEXITSTATUS(retval));
         }
+         ***/
 
         freeLinkedList(commandList);
     }
