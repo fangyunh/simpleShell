@@ -10,6 +10,11 @@
 #define CMDLINE_MAXARGNUM 16
 #define CMDLINE_MAXTOKLEN 32
 #define MAX_BUFFER_SIZE 256
+#define ORIGINAL_INPUT -1
+#define ORIGINAL_OUTPUT -1
+#define ORIGINAL_ERROR -1
+
+
 
 /* Structure for parsing commands */
 struct inputCmd
@@ -22,7 +27,9 @@ struct cmdType
 {
     int binFunc;
     int pip;
+    int metaORdir;
     int oRdir;
+    int metaPip;
 };
 
 /* free the allocated space of linked list*/
@@ -50,7 +57,6 @@ void freeArray(char **head)
 /* Parse the cmds in linked-list (fangyunh) */
 struct inputCmd *parseCmdInList(char *cmd)
 {
-    // char** commands = (char**) calloc(CMDLINE_MAXARGNUM, sizeof(char*));
     int cursor = 0;
     char *token = (char *)calloc(CMDLINE_MAXTOKLEN, sizeof(char));
     char *pos;
@@ -78,10 +84,6 @@ struct inputCmd *parseCmdInList(char *cmd)
             fprintf(stderr, "Command exceeds the limit of token max length\n");
             free(token);
             return NULL;
-        }
-        if (!token)
-        {
-            break;
         }
 
         struct inputCmd *newNode = (struct inputCmd *)calloc(2, sizeof(struct inputCmd));
@@ -134,12 +136,34 @@ char** parseCmdInArr(char* cmd) {
     char* token = (char*) calloc(CMDLINE_MAXTOKLEN, sizeof(char));
     char* pos;
     int count = 0;
+    int i = 0;
 
-    while (cmd != NULL) {
-        sscanf(cmd + cursor, "%[^ ]", token);
-        commands[count] = (char*) calloc(strlen(token) + 1, sizeof(char));
-        strcpy(commands[count], token);
-        count++;
+    if (cmd == NULL || *cmd == '\0')
+    {
+        fprintf(stderr, "Empty command input.\n");
+        free(token);
+        return NULL;
+    }
+
+    while (cmd[i] == ' ')
+    {
+        i++;
+    }
+    cmd += i;
+
+    while (1) {
+        // check does cmd reached the end
+        int status = sscanf(cmd + cursor, "%[^ ]", token);
+
+        if (status > 0)
+        {
+            commands[count] = (char*) calloc(strlen(token) + 1, sizeof(char));
+            strcpy(commands[count], token);
+            count++;
+        } else {
+            break;
+        }
+
 
         pos = strchr(cmd + cursor, ' ');
         while (pos != NULL && *(pos+1) == ' ') {
@@ -148,7 +172,6 @@ char** parseCmdInArr(char* cmd) {
         if (pos == NULL) {
             break;
         }
-        cursor++;
         cursor = pos - cmd + 1;
     }
     commands[count] = NULL; // Satisfy the execvp() requirement
@@ -161,7 +184,9 @@ void typeInit(struct cmdType *type)
 {
     type->binFunc = 0;
     type->oRdir = 0;
+    type->metaORdir = 0;
     type->pip = 0;
+    type->metaPip = 0;
 }
 
 /* Classify the command into different types */
@@ -179,30 +204,47 @@ void deterType(struct inputCmd *list, char *cmd, struct cmdType *type)
 
     if (strchr(cmd, '>'))
     {
+        if (strstr(cmd, ">&"))
+        {
+            type->metaORdir = 1;
+        }
         type->oRdir = 1;
     }
 
     if (strchr(cmd, '|'))
     {
+        if (strstr(cmd, "|&"))
+        {
+            type->metaPip = 1;
+        }
         type->pip = 1;
     }
 }
 
-/* Remove the last element in the linked list */
-void rmvLast(struct inputCmd *head)
+/* Return the standrd input, output, and error back to standard */
+void returnStd(int saveIn, int saveOut, int saveErr)
 {
-    while (head->next->next != NULL)
+    if (saveIn != -1)
     {
-        head = head->next;
+        dup2(saveIn, STDIN_FILENO);
     }
-    struct inputCmd *tail = head;
-    tail = tail->next;
-    head->next = NULL;
-    freeLinkedList(tail);
+    close(saveIn);
+
+    if (saveOut != -1)
+    {
+        dup2(saveOut, STDOUT_FILENO);
+    }
+    close(saveOut);
+
+    if (saveErr != -1)
+    {
+        dup2(saveErr, STDERR_FILENO);
+    }
+    close(saveErr);
 }
 
 /* Execute regular command and $PATH environment commands */
-void execRegCmd(char **instru, char *cmd)
+void execRegCmd(char **instru, char *cmd, int saveIn, int saveOut, int saveErr)
 {
     int retval;
     pid_t pid;
@@ -220,15 +262,32 @@ void execRegCmd(char **instru, char *cmd)
     }
     else
     {
-        wait(&retval);
+        waitpid(pid, &retval, 0);
+        returnStd(saveIn, saveOut, saveErr);
         fprintf(stderr, "+ completed '%s': [%d]\n",
                 cmd, WEXITSTATUS(retval));
     }
 }
 
+/* Divide meta characters string */
+void dviMeta(char *meta, char **arr, char *cmd) {
+    char *curPosition = cmd;
+    int count = 0;
+    char *findMeta = strstr(cmd, meta);
+
+    while (findMeta != NULL)
+    {
+        *findMeta = '\0';
+        arr[count] = curPosition;
+        count++;
+        curPosition = findMeta + strlen(meta);
+        findMeta = strstr(curPosition, meta);
+    }
+    arr[count] = curPosition;
+}
 
 /* Put the file to FD = STDOUT_FILENO */
-void conductRedirection(char **file, char **instruc, char *first)
+void conductRedirection(char **file, char **instruc, char *first, int meta)
 {
     pid_t pid;
     int fd;
@@ -246,9 +305,15 @@ void conductRedirection(char **file, char **instruc, char *first)
             exit(EXIT_FAILURE);
         }
 
+        int saveOut = dup(STDOUT_FILENO);
+        int saveErr = dup(STDERR_FILENO);
         dup2(fd, STDOUT_FILENO);
+        if (meta)
+        {
+            dup2(fd, STDERR_FILENO);
+        }
         close(fd);
-        execRegCmd(instruc, first);
+        execRegCmd(instruc, first, ORIGINAL_INPUT, saveOut, saveErr);
         exit(EXIT_SUCCESS);
     } else {
         waitpid(pid, &status, 0);
@@ -256,19 +321,22 @@ void conductRedirection(char **file, char **instruc, char *first)
 }
 
 /* Output Redirection Structure */
-void outputRedirection(char *cmd)
+void outputRedirection(char *cmd, int meta)
 {
-    char *firstCmd = strtok(cmd, ">");
-    //struct inputCmd *firstHead = parseCmdInList(firstCmd);
-    char **instruc = parseCmdInArr(firstCmd);
-    char *secondCmd = strtok(NULL, ">");
-    char **file = parseCmdInArr(secondCmd);
-    //struct inputCmd *secondHead = parseCmdInList(secondCmd);
-    //rmvLast(firstHead);
+    char **cmdArr = (char **) calloc(CMDLINE_MAXTOKLEN, sizeof(char *));
+    if (meta) {
+        dviMeta(">&", cmdArr, cmd);
+    } else {
+        cmdArr[0] = (char *) calloc(strlen(cmd), sizeof(char));
+        cmdArr[1] = (char *) calloc(strlen(cmd), sizeof(char));
+        strcpy(cmdArr[0], strtok(cmd, ">"));
+        strcpy(cmdArr[1], strtok(NULL, ">"));
+    }
 
-    conductRedirection(file, instruc, firstCmd);
-    //freeLinkedList(secondHead);
-    //freeLinkedList(firstHead);
+    char **instruc = parseCmdInArr(cmdArr[0]);
+    char **file = parseCmdInArr(cmdArr[1]);
+
+    conductRedirection(file, instruc, cmdArr[0], meta);
 }
 
 /* PWD built-in function */
@@ -345,16 +413,6 @@ int main(void)
         if (nl)
             *nl = '\0';
 
-        /* Classify the command type */
-
-
-        /* Detect output redirection */
-//        char *hasRedirect = strchr(cmd, '>');
-//        if (hasRedirect)
-//        {
-//            outputRedirection(cmd);
-//        }
-
         /* Parse the commands in a Linked list */
         commandList = parseCmdInList(cmd);
 
@@ -365,7 +423,7 @@ int main(void)
         if (type->binFunc)
         {
             /* Builtin command */
-            if (!strcmp(cmd, "exit"))
+            if (!strcmp(commandList->cmdStr, "exit"))
             {
                 fprintf(stderr, "Bye...\n");
                 fprintf(stderr, "+ completed '%s': [%d]\n",
@@ -379,13 +437,13 @@ int main(void)
             if (type->oRdir)
             {
                 /* Output Redirection */
-                outputRedirection(cmd);
+                outputRedirection(cmd, type->metaORdir);
             } else if (type->pip){
                 /* Pipe */
             } else {
                 /* Regular command, $PATH environment commands*/
                 char **cmdArr = parseCmdInArr(cmd);
-                execRegCmd(cmdArr, cmd);
+                execRegCmd(cmdArr, cmd, ORIGINAL_INPUT, ORIGINAL_OUTPUT, ORIGINAL_ERROR);
                 freeArray(cmdArr);
             }
 
