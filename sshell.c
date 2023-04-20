@@ -400,8 +400,8 @@ int builtinCd(struct inputCmd *head) {
 int builtinSet(struct inputCmd *cmdList) {
     char *name = (char *) calloc(1, sizeof(char));
     char *content = (char *) calloc(CMDLINE_MAXTOKLEN, sizeof(char));
-    bool isValid = isValidName(name);
-    char validName = name[0];
+    char validName;
+    bool isValid;
     int position = 0;
 
     if (cmdList != NULL && cmdList->next != NULL && cmdList->next->cmdStr != NULL) {
@@ -410,10 +410,14 @@ int builtinSet(struct inputCmd *cmdList) {
         strcpy(name, "");
     }
 
+    isValid = isValidName(name);
+
     if (!isValid) {
         fprintf(stderr, "Error: invalid variable name\n");
         return ERR_STATE;
     }
+
+    validName = name[0];
 
     position = validName - 'a';
     strcpy(content, cmdList->next->next->cmdStr);
