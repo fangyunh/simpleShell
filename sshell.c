@@ -1,19 +1,23 @@
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
 #include <stdbool.h>
-#include <fcntl.h>
+#include <string.h>
 #include <sys/wait.h>
+#include <unistd.h>
 
 #define CMDLINE_MAXCHAR 512
 #define CMDLINE_MAXARGNUM 16
 #define CMDLINE_MAXTOKLEN 32
 #define MAX_BUFFER_SIZE 256
+#define MAX_ENVI_VAR 26
 #define ORIGINAL_INPUT (-1)
 #define ORIGINAL_OUTPUT (-1)
 #define ORIGINAL_ERROR (-1)
+#define ERR_STATE 1
+#define SUC_STATE 0
 
+char *enviVar[MAX_ENVI_VAR] = {""};
 
 /* Structure for parsing commands */
 struct inputCmd {
@@ -132,7 +136,6 @@ char **parseCmdInArr(char *cmd) {
             break;
         }
 
-
         pos = strchr(cmd + cursor, ' ');
         while (pos != NULL && *(pos + 1) == ' ') {
             pos++;
@@ -158,9 +161,9 @@ void typeInit(struct cmdType *type) {
 
 /* Classify the command into different types */
 void deterType(struct inputCmd *list, char *cmd, struct cmdType *type) {
-    char *builtin[] = {"cd", "pwd", "exit"};
+    char *builtin[] = {"cd", "pwd", "exit", "set"};
 
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < 4; i++) {
         if (strcmp(list->cmdStr, builtin[i]) == 0) {
             type->binFunc = 1;
         }
@@ -199,11 +202,82 @@ void returnStd(int saveIn, int saveOut, int saveErr) {
     close(saveErr);
 }
 
+/* Check valid variables names */
+bool isValidName(const char *name) {
+    char validName = name[0];
+    if (strlen(name) != 1) {
+        return false;
+    }
+
+    if (validName >= 'a' && validName <= 'z') {
+        return true;
+    }
+    return false;
+}
+
+/* Detect environmental variables and replace them in list */
+int replaceEnvirVarList(struct inputCmd *list) {
+    struct inputCmd *cmdPtr = list;
+    char *content = (char *) calloc(CMDLINE_MAXTOKLEN, sizeof(char));
+    int position = 0;
+    bool checkNameFlag = false;
+
+    while (cmdPtr != NULL) {
+        char *curCmd = cmdPtr->cmdStr;
+        if (curCmd[0] == '$') {
+            curCmd++;
+            checkNameFlag = isValidName(curCmd);
+            if (!checkNameFlag) {
+                fprintf(stderr, "Error: invalid variable name\n");
+                return ERR_STATE;
+            }
+            position = curCmd[0] - 'a';
+            if (enviVar[position] != NULL) {
+                strcpy(content, enviVar[position]);
+            } else {
+                strcpy(content, "");
+            }
+            cmdPtr->cmdStr = content;
+        }
+        cmdPtr = cmdPtr->next;
+    }
+    return SUC_STATE;
+}
+
+/* Detect environmental variables and replace them in array */
+void replaceEnvirVarArr(char **cmdArr) {
+    //char *cmdBuffer = (char *) calloc(CMDLINE_MAXTOKLEN, sizeof(char));
+    //char *replaceStr = (char *) calloc(CMDLINE_MAXTOKLEN, sizeof(char));
+    char *cmdBuffer = (char *) malloc(sizeof(char));
+    char *replaceStr = (char *) malloc(sizeof(char));
+
+    int varPos = 0;
+    int i = 0;
+
+    while (cmdArr[i] != NULL) {
+        strcpy(cmdBuffer, cmdArr[i]);
+        if (cmdBuffer[0] == '$') {
+            varPos = cmdBuffer[1] - 'a';
+            if (enviVar[varPos] != NULL) {
+                strcpy(replaceStr, enviVar[varPos]);
+            } else {
+                strcpy(replaceStr, "");
+            }
+            strcpy(cmdArr[i], replaceStr);
+        }
+        i++;
+    }
+
+    free(cmdBuffer);
+    free(replaceStr);
+}
+
 /* Execute regular command and $PATH environment commands */
 void execRegCmd(char **instru, char *cmd, int saveIn, int saveOut, int saveErr) {
     int retval;
     pid_t pid;
     pid = fork();
+    replaceEnvirVarArr(instru);
     if (pid < 0) {
         fprintf(stderr, "fork error\n");
         exit(EXIT_FAILURE);
@@ -306,9 +380,9 @@ int builtinPWD() {
         printf("%s\n", buffer);
     } else {
         fprintf(stderr, "PWD error");
-        return 1;
+        return ERR_STATE;
     }
-    return 0;
+    return SUC_STATE;
 }
 
 /* cd built-in function */
@@ -317,9 +391,37 @@ int builtinCd(struct inputCmd *head) {
     int status = chdir(filePath->cmdStr);
     if (status == -1) {
         fprintf(stderr, "Error: cannot cd into directory\n");
-        return 1;
+        return ERR_STATE;
     }
-    return 0;
+    return SUC_STATE;
+}
+
+/* Set global variables */
+int builtinSet(struct inputCmd *cmdList) {
+    char *name = (char *) calloc(1, sizeof(char));
+    char *content = (char *) calloc(CMDLINE_MAXTOKLEN, sizeof(char));
+    bool isValid = isValidName(name);
+    char validName = name[0];
+    int position = 0;
+
+    if (cmdList != NULL && cmdList->next != NULL && cmdList->next->cmdStr != NULL) {
+        strcpy(name, cmdList->next->cmdStr);
+    } else {
+        strcpy(name, "");
+    }
+
+    if (!isValid) {
+        fprintf(stderr, "Error: invalid variable name\n");
+        return ERR_STATE;
+    }
+
+    position = validName - 'a';
+    strcpy(content, cmdList->next->next->cmdStr);
+    enviVar[position] = realloc(enviVar[position], strlen(content) + 1);
+    strcpy(enviVar[position], content);
+    free(name);
+    free(content);
+    return SUC_STATE;
 }
 
 /* Determine and execute bulit-in functions */
@@ -329,6 +431,8 @@ int builtinFunctions(struct inputCmd *head) {
         status = builtinCd(head);
     } else if (!strcmp(head->cmdStr, "pwd")) {
         status = builtinPWD();
+    } else if (!strcmp(head->cmdStr, "set")) {
+        status = builtinSet(head);
     }
     return status;
 }
@@ -357,6 +461,7 @@ int main(void) {
         struct inputCmd *commandList;
         struct cmdType *type = (struct cmdType *) calloc(5, sizeof(struct cmdType));
         int builtinStat = 0;
+        int repEnvirVarStat = 0;
         typeInit(type);
 
 
@@ -397,6 +502,12 @@ int main(void) {
         /* Parse the commands in a Linked list */
         commandList = parseCmdInList(cmd);
 
+        /* Replace strings to environment variables */
+        repEnvirVarStat = replaceEnvirVarList(commandList);
+        if (repEnvirVarStat == ERR_STATE) {
+            continue;
+        }
+
         /* Determine the type of command */
         deterType(commandList, cmd, type);
 
@@ -426,31 +537,6 @@ int main(void) {
             }
 
         }
-
-
-        /***
-        pid = fork();
-        if (pid < 0)
-        {
-            fprintf(stderr, "fork error");
-            exit(EXIT_FAILURE);
-        }
-        else if (pid == 0)
-        {
-            // Child process
-            char *instru[] = {"sh", "-c", cmd, NULL};
-            execvp("sh", instru);
-            fprintf(stderr, "execvp error");
-            exit(EXIT_FAILURE);
-        }
-        else
-        {
-            // Parent process
-            wait(&retval);
-            fprintf(stderr, "+ completed '%s': [%d]\n",
-                    cmd, WEXITSTATUS(retval));
-        }
-         ***/
 
         freeLinkedList(commandList);
     }
