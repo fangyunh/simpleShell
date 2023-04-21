@@ -27,13 +27,15 @@ Finally, we free allocated spaces and start a new turn of the infinite loop.
 The built-in functions part has four parts: cd, pwd, exit, and set. The exit is provided by reference so it will be checked at first. Then, the builtinFunctions() determine the commands according to their first element in the linked-list. Each of them will return the status about execution.
 
 #### cd
+
 The function simply called chdir() to access different categories.
 
 #### pwd
 
-
+Implemented thorugh getcwd command.
 
 #### set
+
 The set built-in function supports users to store 26 different values in environmental varaibles. Firstly, it will check the name of environmental variables is correct. Then, it calculates the position of the variable in global array and store the value in the correct position.
 
 ### Output Redirection
@@ -44,6 +46,7 @@ After parsing the command, the function will create a new process by fork() and 
 
 ### Piping
 
+Once a type of pip has been recived, the main function will call pipedOps() to process the user command. Inside pipedOps(), three pipe and total of 4 processes has been initiallized at very start to corresponded with user's command. Dynamically adjust for the number of pipe users wanted, different process will be created and executed concurrently. Following the same pattern shared in the lecture, process 1 and process 2 will be connected to pipe1 where process1 write stdout to pipe, and process2 read from it and print to stdout. Following a similar pattern, process 3, 4 will also using the same way to connect through pipes. Inside each process, only the used fd will be opened and the rest of time all three initialied pipes' unused fd will be closed. When calling different UNIX functions if the outside process has detected that the user wanted to redirect stderr then both stdout and stderr will be write to pipes.
 
 ### Regular Functions and $PATH Commands
 
